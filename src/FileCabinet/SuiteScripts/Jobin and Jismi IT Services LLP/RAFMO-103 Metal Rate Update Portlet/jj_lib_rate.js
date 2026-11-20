@@ -19,7 +19,7 @@
  *   });
  *
  * REVISION HISTORY :
- * @version 1.0 18-November-2026 : Initial build by JJ0494\
+ * @version 1.0 18-November-2026 : Initial build by JJ0494
  */
 define(['N/search', 'N/format', 'N/error'],
     (search, format, error) => {
