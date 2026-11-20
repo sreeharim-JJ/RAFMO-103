@@ -1,41 +1,46 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Portlet
+ * @NModuleScope SameAccount
+ *
  * *********************************************************************************************************************************
  *
- * ${RAFMO-103} : ${P2P—Develop Daily Metal Rate Update Customization in NetSuite}
+ * Rafmoh Bullion NS IN
  *
- * ********************************************************************************************************************************
+ * RAFMO-103 : P2P - Develop Daily Metal Rate Update Customization in NetSuite
+ *
+ * *********************************************************************************************************************************
  *
  * Author : Jobin and Jismi
  *
  * Date Created : 18-November-2026
  *
- * Description : This Portlet script shows the Rate Update form on the Rate Administrator's dashboard (Metal Type, Currency, Rate,
- *               Effective Date) and posts the entered details to the Rate Update Suitelet. It also lists today's saved rate for
- *               each currency from the Daily Metal Rate custom record.
- *
- * REVISION HISTORY :
- *
- * @version 1.0 18-November-2026 : Created the initial build by JJ0494
- * 
- * 
- * COPYRIGHT © 2024 Jobin & Jismi.
+ * COPYRIGHT © 2026 Jobin & Jismi IT Services LLP.
  * All rights reserved. This script is a proprietary product of Jobin & Jismi IT Services LLP and is protected by copyright
  * law and international treaties. Unauthorized reproduction or distribution of this script, or any portion of it,
  * may result in severe civil and criminal penalties and will be prosecuted to the maximum extent possible under law.
- * ********************************************************************************************************************************
+ *
+ * Description : This Portlet script shows the Rate Update form on the Rate Administrator's dashboard (Metal Type, Currency, Rate,
+ *               Effective Date) and posts the entered details to the Rate Update Suitelet. It also lists today's saved rate for
+ *               each currency and Metal Type (one column per metal) from the Daily Metal Rate custom record.
+ *
+ * REVISION HISTORY :
+ *
+ * @version 1.0 RAFMO-103 : 18-November-2026 : Created the initial build by JJ0494
+ * @version 1.1 RAFMO-103 : 20-November-2026 : The rate table now has a column for each Metal Type, so the metal that was updated is visible
+ *
+ * *********************************************************************************************************************************
  */
-define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/runtime'],
+define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format'],
     /**
- * @param{record} record
- * @param{search} search
- * @param{serverWidget} serverWidget
- * @param{url} url
- * @param{format} format
- * @param{runtime} runtime
- */
-    function (record, search, serverWidget, url, format, runtime) {
+     * @param {record} record
+     * @param {search} search
+     * @param {serverWidget} serverWidget
+     * @param {url} url
+     * @param {format} format
+     */
+    function (record, search, serverWidget, url, format) {
+        'use strict';
 
         const REC_TYPE = 'customrecord_jj_metal_rate';
         const METAL_LIST_ID = 'customlist_jj_mr_metal_type'; // change the list ID if different
@@ -43,144 +48,240 @@ define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/run
         const SUITELET_DEPLOYMENT_ID = 'customdeploy_jj_sl_rate_update';
 
         /**
+         * @typedef {Object} CurrencyEntry
+         * @property {string} currencyId - Internal ID of the currency
+         * @property {string} currencyName - Currency name
+         * @property {string} currencySymbol - Currency symbol
+         * @property {Object<string, string>} rates - Today's formatted rate per Metal Type: { metalId: formattedRate }
+         */
+
+        /**
+         * @typedef {Object} MetalEntry
+         * @property {string} metalId - Internal ID of the Metal Type list value
+         * @property {string} metalName - Metal Type name
+         */
+
+        /**
          * Today's date as YYYY-MM-DD for the Effective Date field.
-         * @returns {string}
+         * @returns {string} The date, or an empty string when it cannot be worked out
          */
         const getTodayValue = () => {
-            const today = format.parse({ value: format.format({ value: new Date(), type: format.Type.DATE }), type: format.Type.DATE });
-            const todayValue = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-            log.debug('Default effective date', todayValue);
-            return todayValue;
+            try {
+                const today = format.parse({ value: format.format({ value: new Date(), type: format.Type.DATE }), type: format.Type.DATE });
+                return today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+            } catch (e) {
+                log.error('error@getTodayValue', e);
+                return '';
+            }
         };
 
         /**
          * Fetches all active currencies.
-         * @returns {Array<{currencyId, currencyName, currencySymbol}>}
+         * @returns {Array<CurrencyEntry>} The currencies (empty when the search fails)
          */
         const getCurrencies = () => {
-            const currencies = [];
-            search.create({
-                type: 'currency',
-                filters: ["isinactive","is","F"],
-                columns: [
-                    search.createColumn({ name: "internalid", sort: search.Sort.ASC, label: "Internal ID" }),
-                    search.createColumn({ name: "name", label: "Currency Name" }),
-                    search.createColumn({ name: "symbol", label: "Symbol" })
-                ]
-            }).run().each((result) => {
-                currencies.push({
-                    currencyId: result.getValue('internalid'),
-                    currencyName: result.getValue('name'),
-                    currencySymbol: result.getValue('symbol')
+            try {
+                const currencies = [];
+                search.create({
+                    type: 'currency',
+                    filters: ["isinactive", "is", "F"],
+                    columns: [
+                        search.createColumn({ name: "internalid", sort: search.Sort.ASC, label: "Internal ID" }),
+                        search.createColumn({ name: "name", label: "Currency Name" }),
+                        search.createColumn({ name: "symbol", label: "Symbol" })
+                    ]
+                }).run().each((result) => {
+                    currencies.push({
+                        currencyId: result.getValue('internalid'),
+                        currencyName: result.getValue('name'),
+                        currencySymbol: result.getValue('symbol'),
+                        rates: {} // today's rate per Metal Type: { metalId: formattedRate }
+                    });
+                    return true; // Continue iterating
                 });
-                return true; // Continue iterating
-            });
-            log.debug('Currencies loaded', 'Count: ' + currencies.length);
-            return currencies;
+                return currencies;
+            } catch (e) {
+                log.error('error@getCurrencies', e);
+                return [];
+            }
         };
 
         /**
          * Builds the Currency dropdown options.
-         * @returns {string} HTML option tags
+         * @param {Array<CurrencyEntry>} currencies - Currencies from getCurrencies
+         * @returns {string} HTML option tags (empty when it fails)
          */
         const buildCurrencyOptions = (currencies) => {
-            return currencies.map(item => `<option value="${item.currencyId}">${item.currencyName}</option>`).join('');
+            try {
+                return currencies.map(item => `<option value="${item.currencyId}">${item.currencyName}</option>`).join('');
+            } catch (e) {
+                log.error('error@buildCurrencyOptions', e);
+                return '';
+            }
         };
 
         /**
-         * Builds the Metal Type dropdown options from the custom list.
-         * @returns {string} HTML option tags
+         * Fetches all active Metal Types from the custom list.
+         * @returns {Array<MetalEntry>} The metal types (empty when the search fails)
          */
-        const buildMetalOptions = () => {
-            let metalOptions = '';
-            let metalCount = 0;
-            search.create({
-                type: METAL_LIST_ID,
-                filters: ["isinactive","is","F"],
-                columns: [
-                    search.createColumn({ name: "name", sort: search.Sort.ASC, label: "Metal Type" })
-                ]
-            }).run().each((result) => {
-                metalOptions += `<option value="${result.id}">${result.getValue('name')}</option>`;
-                metalCount++;
-                return true; // Continue iterating
-            });
-            log.debug('Metal types loaded', 'Count: ' + metalCount);
-            return metalOptions;
+        const getMetals = () => {
+            try {
+                const metals = [];
+                search.create({
+                    type: METAL_LIST_ID,
+                    filters: ["isinactive", "is", "F"],
+                    columns: [
+                        search.createColumn({ name: "name", sort: search.Sort.ASC, label: "Metal Type" })
+                    ]
+                }).run().each((result) => {
+                    metals.push({ metalId: String(result.id), metalName: result.getValue('name') });
+                    return true; // Continue iterating
+                });
+                return metals;
+            } catch (e) {
+                log.error('error@getMetals', e);
+                return [];
+            }
+        };
+
+        /**
+         * Builds the Metal Type dropdown options.
+         * @param {Array<MetalEntry>} metals - Metal types from getMetals
+         * @returns {string} HTML option tags (empty when it fails)
+         */
+        const buildMetalOptions = (metals) => {
+            try {
+                return metals.map(item => `<option value="${item.metalId}">${item.metalName}</option>`).join('');
+            } catch (e) {
+                log.error('error@buildMetalOptions', e);
+                return '';
+            }
         };
 
         /**
          * Formats a rate with commas and 2 decimals.
-         * @returns {string}
+         * @param {number|string} rate - The rate to format
+         * @returns {string} The formatted rate, or 'Not Available' when there is no rate
          */
         const formatRate = (rate) => {
-            return rate ? new Intl.NumberFormat('en-US', {
-                style: 'decimal',
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }).format(rate) : 'Not Available';
+            try {
+                return rate ? new Intl.NumberFormat('en-US', {
+                    style: 'decimal',
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }).format(rate) : 'Not Available';
+            } catch (e) {
+                log.error('error@formatRate', e);
+                return 'Not Available';
+            }
         };
 
         /**
-         * Adds today's rate (goldPrice) to each currency entry, using the first rate found per currency.
+         * Adds today's rate to each currency entry for every Metal Type (currency.rates[metalId]),
+         * using the newest rate found per Metal Type + Currency. The entries are changed in place;
+         * when the search fails they keep no rates and the table shows "Not Available".
+         * @param {Array<CurrencyEntry>} currencies - Currencies from getCurrencies
+         * @returns {void}
          */
         const addTodaysRates = (currencies) => {
-            search.create({
-                type: REC_TYPE,
-                columns: [
-                    search.createColumn({ name: "internalid", sort: search.Sort.DESC, label: "internalid" }),
-                    search.createColumn({ name: "custrecord_jj_mr_currency", label: "Currency" }),
-                    search.createColumn({ name: "custrecord_jj_mr_rate", label: "Metal Rate" })
-                ],
-                filters: [
-                    ['isinactive', 'is', 'F'],
-                    'AND',
-                    ["custrecord_jj_mr_effdate", "within", "today"]
-                ]
-            }).run().each(result => {
-                const currency = result.getValue({ name: 'custrecord_jj_mr_currency' });
-                const rate = result.getValue({ name: 'custrecord_jj_mr_rate' });
+            try {
+                search.create({
+                    type: REC_TYPE,
+                    columns: [
+                        search.createColumn({ name: "internalid", sort: search.Sort.DESC, label: "internalid" }),
+                        search.createColumn({ name: "custrecord_jj_mr_metal", label: "Metal Type" }),
+                        search.createColumn({ name: "custrecord_jj_mr_currency", label: "Currency" }),
+                        search.createColumn({ name: "custrecord_jj_mr_rate", label: "Metal Rate" })
+                    ],
+                    filters: [
+                        ['isinactive', 'is', 'F'],
+                        'AND',
+                        ["custrecord_jj_mr_effdate", "within", "today"]
+                    ]
+                }).run().each(result => {
+                    const metal = result.getValue({ name: 'custrecord_jj_mr_metal' });
+                    const currency = result.getValue({ name: 'custrecord_jj_mr_currency' });
+                    const rate = result.getValue({ name: 'custrecord_jj_mr_rate' });
 
-                // Show the first rate found per currency in the table
-                const currencyEntry = currencies.find(entry => entry.currencyId === currency);
-                if (currencyEntry && !currencyEntry.hasOwnProperty('goldPrice')) {
-                    currencyEntry.goldPrice = formatRate(rate);
-                }
-                return true; // Continue iteration
-            });
-            log.debug('Updated Todays Rate List', JSON.stringify(currencies));
+                    // Keep the first (newest) rate found for each Metal Type in each currency
+                    const currencyEntry = currencies.find(entry => entry.currencyId === currency);
+                    if (currencyEntry && !currencyEntry.rates.hasOwnProperty(metal)) {
+                        currencyEntry.rates[metal] = formatRate(rate);
+                    }
+                    return true; // Continue iteration
+                });
+            } catch (e) {
+                log.error('error@addTodaysRates', e);
+            }
         };
 
         /**
-         * Builds the table rows showing today's rate per currency.
-         * @returns {string} HTML table rows
+         * Builds the table header: Currency plus one column for each Metal Type.
+         * @param {Array<MetalEntry>} metals - Metal types from getMetals
+         * @returns {string} HTML table header row (empty when it fails)
          */
-        const buildTableRows = (currencies) => {
-            return currencies.map(item => `
+        const buildTableHeader = (metals) => {
+            try {
+                return `
+                <tr>
+                    <th>Currency</th>
+                    ${metals.map(metal => `<th class="th-price">${metal.metalName}</th>`).join('')}
+                </tr>
+            `;
+            } catch (e) {
+                log.error('error@buildTableHeader', e);
+                return '';
+            }
+        };
+
+        /**
+         * Builds the table rows showing today's rate per currency, with one cell for each Metal Type.
+         * A metal without a rate today shows "Not Available", so an updated metal stands out.
+         * @param {Array<CurrencyEntry>} currencies - Currencies with today's rates (after addTodaysRates)
+         * @param {Array<MetalEntry>} metals - Metal types from getMetals
+         * @returns {string} HTML table rows (empty when it fails)
+         */
+        const buildTableRows = (currencies, metals) => {
+            try {
+                return currencies.map(item => `
                 <tr>
                     <td>${item.currencyName} (${item.currencySymbol})</td>
-                    <td class= "td-price">${item.goldPrice || 'Not Available'}</td>
+                    ${metals.map(metal => {
+                        const rate = item.rates[metal.metalId];
+                        return rate
+                            ? `<td class="td-price">${rate}</td>`
+                            : `<td class="td-price td-na">Not Available</td>`;
+                    }).join('')}
                 </tr>
             `).join('');
+            } catch (e) {
+                log.error('error@buildTableRows', e);
+                return '';
+            }
         };
 
         /**
-         * Resolves the URL of the Rate Update Suitelet.
-         * @returns {string}
+         * Resolves the URL of the Rate Update Suitelet. The error is logged and thrown again, because an empty
+         * URL would post the form to the wrong page; render then shows the error inside the portlet.
+         * @returns {string} The internal Suitelet URL
+         * @throws {Error} Any error raised while resolving the URL
          */
         const getSuiteletUrl = () => {
-            const suiteletUrl = url.resolveScript({
-                scriptId: SUITELET_SCRIPT_ID,
-                deploymentId: SUITELET_DEPLOYMENT_ID,
-                returnExternalUrl: false
-            });
-            log.debug('Suitelet URL resolved', suiteletUrl);
-            return suiteletUrl;
+            try {
+                return url.resolveScript({
+                    scriptId: SUITELET_SCRIPT_ID,
+                    deploymentId: SUITELET_DEPLOYMENT_ID,
+                    returnExternalUrl: false
+                });
+            } catch (e) {
+                log.error('error@getSuiteletUrl', e);
+                throw e;
+            }
         };
 
         /**
          * CSS for the portlet.
-         * @returns {string}
+         * @returns {string} HTML style tag
          */
         const getStyles = () => `
             <style>
@@ -262,8 +363,15 @@ define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/run
                     font-weight: normal;
                     color: #000000;
                 }
+                .th-price {
+                    text-align: right;
+                }
                 .td-price {
                     text-align: right;
+                }
+                .td-na {
+                    color: #999999;
+                    font-style: italic;
                 }
             </style>
         `;
@@ -272,9 +380,13 @@ define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/run
          * Builds the browser script. On submit it asks the Suitelet whether a rate already exists for the same
          * Metal Type, Currency and Effective Date. If it exists with a different rate, a confirmation popup is shown and the
          * form is posted (with confirmupdate = T) only when the user clicks OK.
-         * @returns {string} HTML script tag
+         * @param {{suiteletUrl: string}} data - Portlet data
+         * @param {string} data.suiteletUrl - URL of the Rate Update Suitelet
+         * @returns {string} HTML script tag (empty when it fails)
          */
-        const buildConfirmScript = (data) => `
+        const buildConfirmScript = (data) => {
+            try {
+                return `
             <script>
                 var rateCheckUrl = ${JSON.stringify(data.suiteletUrl)};
                 var RATE_TOLERANCE = 0.000001;
@@ -352,22 +464,33 @@ define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/run
                 });
             </script>
         `;
+            } catch (e) {
+                log.error('error@buildConfirmScript', e);
+                return '';
+            }
+        };
 
         /**
          * Builds the complete portlet HTML (styles, confirmation script, rate table and update form).
-         * @returns {string}
+         * @param {Object} data - Portlet data
+         * @param {string} data.theadContent - HTML table header row
+         * @param {string} data.tbodyContent - HTML table rows
+         * @param {string} data.suiteletUrl - URL of the Rate Update Suitelet
+         * @param {string} data.metalOptions - Metal Type dropdown options
+         * @param {string} data.currencyOptions - Currency dropdown options
+         * @param {string} data.todayValue - Today's date as YYYY-MM-DD
+         * @returns {string} The portlet HTML (empty when it fails)
          */
-        const buildPortletHtml = (data) => `
+        const buildPortletHtml = (data) => {
+            try {
+                return `
             ${getStyles()}
             ${buildConfirmScript(data)}
             <div class="price-display">
                 Daily Metal Rate Update
                 <table>
                     <thead>
-                        <tr>
-                            <th>Currency</th>
-                            <th>Price</th>
-                        </tr>
+                        ${data.theadContent}
                     </thead>
                     <tbody>
                     ${data.tbodyContent}
@@ -402,51 +525,64 @@ define(['N/record', 'N/search', 'N/ui/serverWidget', 'N/url', 'N/format', 'N/run
                 </div>
             </form>
         `;
-
-        /**
-         * Shows the error text inside the portlet so it is not blank.
-         */
-        const showError = (portlet, error) => {
-            log.error('Error in Portlet Script', 'Name: ' + error.name + ' | Message: ' + error.message + ' | Stack: ' + error.stack);
-            portlet.html = '<div style="padding:10px;color:#c62828;font-weight:bold;">Portlet error: ' +
-                error.name + ' - ' + error.message + '</div>';
+            } catch (e) {
+                log.error('error@buildPortletHtml', e);
+                return '';
+            }
         };
 
         /**
-         * Defines the Portlet script trigger point.
+         * Logs the error and shows its text inside the portlet so it is not blank.
+         * @param {Portlet} portlet - The portlet object used for rendering
+         * @param {Error} e - The caught error
+         * @returns {void}
+         */
+        const showError = (portlet, e) => {
+            try {
+                log.error('error@render', e);
+                portlet.html = '<div style="padding:10px;color:#c62828;font-weight:bold;">Portlet error: ' +
+                    e.name + ' - ' + e.message + '</div>';
+            } catch (showErrorException) {
+                log.error('error@showError', showErrorException);
+            }
+        };
+
+        /**
+         * Portlet entry point. Builds the rate table and the Rate Update form.
          * @param {Object} params - The params parameter is a JavaScript object. It is automatically passed to the script entry
          *     point by NetSuite. The values for params are read-only.
          * @param {Portlet} params.portlet - The portlet object used for rendering
-         * @param {string} params.column - Column index forthe portlet on the dashboard; left column (1), center column (2) or
+         * @param {string} params.column - Column index for the portlet on the dashboard; left column (1), center column (2) or
          *     right column (3)
          * @param {string} params.entity - (For custom portlets only) references the customer ID for the selected customer
-         * @since 2015.2
+         * @returns {void}
          */
         const render = (params) => {
             const portlet = params.portlet;
             try {
                 portlet.title = ' ';
-                log.debug('Portlet render started', 'User: ' + runtime.getCurrentUser().id + ', Role: ' + runtime.getCurrentUser().role);
 
                 const currencies = getCurrencies();
+                const metals = getMetals();
                 const currencyOptions = buildCurrencyOptions(currencies);
-                const metalOptions = buildMetalOptions();
+                const metalOptions = buildMetalOptions(metals);
                 const todayValue = getTodayValue();
 
                 addTodaysRates(currencies);
-                const tbodyContent = buildTableRows(currencies);
+                const theadContent = buildTableHeader(metals);
+                const tbodyContent = buildTableRows(currencies, metals);
                 const suiteletUrl = getSuiteletUrl();
 
                 portlet.html = buildPortletHtml({
+                    theadContent: theadContent,
                     tbodyContent: tbodyContent,
                     suiteletUrl: suiteletUrl,
                     metalOptions: metalOptions,
                     currencyOptions: currencyOptions,
                     todayValue: todayValue
                 });
-                log.debug('Portlet render completed', 'HTML length: ' + portlet.html.length);
-            } catch (error) {
-                showError(portlet, error);
+            } catch (e) {
+                showError(portlet, e);
             }
         };
 
